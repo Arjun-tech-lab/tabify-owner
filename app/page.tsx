@@ -1,75 +1,112 @@
-"use client"
+"use client";
 
-import { useEffect, useState } from "react"
-import { motion, AnimatePresence } from "framer-motion"
-import { io, Socket } from "socket.io-client"
-import DashboardHeader from "@/components/dashboard-header"
-import LiveRequests from "@/components/live-requests"
-import PaidBills from "@/components/paid-bills"
-import UnpaidBills from "@/components/unpaid-bills"
+import { useEffect, useRef, useState } from "react";
+import { motion, AnimatePresence } from "framer-motion";
+import { io, Socket } from "socket.io-client";
+import DashboardHeader from "@/components/dashboard-header";
+import LiveRequests from "@/components/live-requests";
+import PaidBills from "@/components/paid-bills";
+import UnpaidBills from "@/components/unpaid-bills";
 
 export default function OwnerDashboard() {
-  const [activeTab, setActiveTab] = useState<"live" | "paid" | "unpaid">("live")
-  const [orders, setOrders] = useState<any[]>([])
-  const [paidBills, setPaidBills] = useState<any[]>([])
-  const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null)
+  const [activeTab, setActiveTab] = useState<"live" | "paid" | "unpaid">("live");
+  const [orders, setOrders] = useState<any[]>([]);
+  const [paidBills, setPaidBills] = useState<any[]>([]);
+  const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
+
+  const socketRef = useRef<Socket | null>(null);
 
   useEffect(() => {
-    // ✅ Create socket inside useEffect to avoid multiple connections
     const socket: Socket = io("http://localhost:5001", {
       transports: ["websocket"],
-      withCredentials: true,
-      reconnectionAttempts: 5,
-    })
+    });
+    socketRef.current = socket;
 
-    // 🔌 When connected
+    // ✅ Register as owner
     socket.on("connect", () => {
-      console.log("✅ Owner connected to backend:", socket.id)
-    })
+      console.log("✅ Owner connected:", socket.id);
+      socket.emit("registerRole", "owner");
+    });
 
-    // 📨 When receiving a new order
+    // 🆕 When new order arrives
     socket.on("newOrder", (order) => {
-      console.log("📦 New order received:", order)
-      setOrders((prev) => [...prev, order])
-    })
+      console.log("📦 New order received:", order);
+      setOrders((prev) => {
+        const exists = prev.find((o) => o.id === order.id);
+        return exists ? prev : [...prev, order];
+      });
+    });
 
-    // ❌ When disconnected
-    socket.on("disconnect", (reason) => {
-      console.log("⚠️ Disconnected:", reason)
-    })
+    // 🔁 When any order updates (accepted or paid)
+    socket.on("orderUpdate", (updatedOrder) => {
+      console.log("🔁 Order updated:", updatedOrder);
 
-    // ✅ Cleanup properly
+      setOrders((prev) =>
+        prev.map((o) => (o.id === updatedOrder.id ? { ...o, ...updatedOrder } : o))
+      );
+
+      // ✅ Update paid bills
+      if (updatedOrder.paymentStatus === "paid") {
+        setPaidBills((prev) => {
+          const exists = prev.find((b) => b.id === updatedOrder.id);
+          return exists
+            ? prev.map((b) => (b.id === updatedOrder.id ? updatedOrder : b))
+            : [...prev, updatedOrder];
+        });
+      } else {
+        // Remove from paid if reverted
+        setPaidBills((prev) => prev.filter((b) => b.id !== updatedOrder.id));
+      }
+    });
+
+    socket.on("disconnect", () => {
+      console.log("❌ Owner disconnected:", socket.id);
+    });
+
     return () => {
-      socket.off("connect")
-      socket.off("newOrder")
-      socket.off("disconnect")
-      socket.close()
-    }
-  }, [])
+      socket.disconnect();
+    };
+  }, []);
 
+  // 👑 Owner actions
   const handleAcceptOrder = (id: string) => {
-    setOrders((prev) => prev.filter((order) => order.id !== id))
-    setToast({ message: "✅ Order accepted!", type: "success" })
-    setTimeout(() => setToast(null), 3000)
-  }
+  if (!socketRef.current) return;
+  console.log(`👑 Accepting order: ${id}`);
+  
+  // 🔹 Emit acceptance to backend
+  socketRef.current.emit("acceptOrder", id);
+  
+  // 🔹 Immediately remove it from the live list (UI clear)
+  setOrders((prev) => prev.filter((o) => o.id !== id));
+
+  // ✅ Optional: If you still want to track accepted ones, you can push them to a separate array here
+  // setAcceptedOrders(prev => [...prev, acceptedOrder]);
+
+  showToast("✅ Order accepted!", "success");
+};
+
 
   const handleDeclineOrder = (id: string) => {
-    setOrders((prev) => prev.filter((order) => order.id !== id))
-    setToast({ message: "❌ Order declined", type: "error" })
-    setTimeout(() => setToast(null), 3000)
-  }
+    setOrders((prev) => prev.filter((order) => order.id !== id));
+    showToast("❌ Order declined", "error");
+  };
 
   const handleMarkAsPaid = (id: string) => {
-    const order = orders.find((o) => o.id === id)
-    if (order) {
-      setOrders((prev) => prev.filter((o) => o.id !== id))
-      setPaidBills((prev) => [...prev, { ...order, status: "Paid" }])
-      setToast({ message: "✅ Payment marked as received!", type: "success" })
-      setTimeout(() => setToast(null), 3000)
-    }
-  }
+    if (!socketRef.current) return;
+    console.log(`💳 Marking order ${id} as paid`);
+    socketRef.current.emit("updatePaymentStatus", {
+      orderId: id,
+      paymentStatus: "paid",
+    });
+  };
 
-  const unpaidOrders = orders.filter((o) => o.status === "Pending")
+  const showToast = (message: string, type: "success" | "error") => {
+    setToast({ message, type });
+    setTimeout(() => setToast(null), 3000);
+  };
+
+  // ✅ Unpaid orders
+  const unpaidOrders = orders.filter((o) => o.paymentStatus !== "paid");
 
   return (
     <div className="min-h-screen bg-background">
@@ -88,7 +125,9 @@ export default function OwnerDashboard() {
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id as typeof activeTab)}
                 className={`py-4 px-2 font-medium text-sm relative transition-colors ${
-                  activeTab === tab.id ? "text-primary" : "text-muted-foreground hover:text-foreground"
+                  activeTab === tab.id
+                    ? "text-primary"
+                    : "text-muted-foreground hover:text-foreground"
                 }`}
               >
                 {tab.label}
@@ -118,7 +157,11 @@ export default function OwnerDashboard() {
           )}
           {activeTab === "paid" && <PaidBills key="paid" bills={paidBills} />}
           {activeTab === "unpaid" && (
-            <UnpaidBills key="unpaid" orders={unpaidOrders} onMarkAsPaid={handleMarkAsPaid} />
+            <UnpaidBills
+              key="unpaid"
+              orders={unpaidOrders}
+              onMarkAsPaid={handleMarkAsPaid}
+            />
           )}
         </AnimatePresence>
       </div>
@@ -141,5 +184,5 @@ export default function OwnerDashboard() {
         )}
       </AnimatePresence>
     </div>
-  )
+  );
 }
