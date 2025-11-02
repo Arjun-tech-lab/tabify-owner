@@ -17,18 +17,19 @@ export default function OwnerDashboard() {
   const socketRef = useRef<Socket | null>(null);
 
   useEffect(() => {
-    const socket: Socket = io("http://localhost:5001", {
+    const SOCKET_URL = process.env.NEXT_PUBLIC_SOCKET_SERVER_URL || "http://localhost:5001";
+
+    const socket: Socket = io(SOCKET_URL, {
       transports: ["websocket"],
     });
+
     socketRef.current = socket;
 
-    // ✅ Register as owner
     socket.on("connect", () => {
       console.log("✅ Owner connected:", socket.id);
       socket.emit("registerRole", "owner");
     });
 
-    // 🆕 When new order arrives
     socket.on("newOrder", (order) => {
       console.log("📦 New order received:", order);
       setOrders((prev) => {
@@ -37,7 +38,6 @@ export default function OwnerDashboard() {
       });
     });
 
-    // 🔁 When any order updates (accepted or paid)
     socket.on("orderUpdate", (updatedOrder) => {
       console.log("🔁 Order updated:", updatedOrder);
 
@@ -45,7 +45,6 @@ export default function OwnerDashboard() {
         prev.map((o) => (o.id === updatedOrder.id ? { ...o, ...updatedOrder } : o))
       );
 
-      // ✅ Update paid bills
       if (updatedOrder.paymentStatus === "paid") {
         setPaidBills((prev) => {
           const exists = prev.find((b) => b.id === updatedOrder.id);
@@ -54,13 +53,12 @@ export default function OwnerDashboard() {
             : [...prev, updatedOrder];
         });
       } else {
-        // Remove from paid if reverted
         setPaidBills((prev) => prev.filter((b) => b.id !== updatedOrder.id));
       }
     });
 
     socket.on("disconnect", () => {
-      console.log("❌ Owner disconnected:", socket.id);
+      console.log("❌ Owner disconnected");
     });
 
     return () => {
@@ -68,23 +66,13 @@ export default function OwnerDashboard() {
     };
   }, []);
 
-  // 👑 Owner actions
   const handleAcceptOrder = (id: string) => {
-  if (!socketRef.current) return;
-  console.log(`👑 Accepting order: ${id}`);
-  
-  // 🔹 Emit acceptance to backend
-  socketRef.current.emit("acceptOrder", id);
-  
-  // 🔹 Immediately remove it from the live list (UI clear)
-  setOrders((prev) => prev.filter((o) => o.id !== id));
-
-  // ✅ Optional: If you still want to track accepted ones, you can push them to a separate array here
-  // setAcceptedOrders(prev => [...prev, acceptedOrder]);
-
-  showToast("✅ Order accepted!", "success");
-};
-
+    if (!socketRef.current) return;
+    console.log(`👑 Accepting order: ${id}`);
+    socketRef.current.emit("acceptOrder", id);
+    setOrders((prev) => prev.filter((o) => o.id !== id));
+    showToast("✅ Order accepted!", "success");
+  };
 
   const handleDeclineOrder = (id: string) => {
     setOrders((prev) => prev.filter((order) => order.id !== id));
@@ -105,7 +93,6 @@ export default function OwnerDashboard() {
     setTimeout(() => setToast(null), 3000);
   };
 
-  // ✅ Unpaid orders
   const unpaidOrders = orders.filter((o) => o.paymentStatus !== "paid");
 
   return (
