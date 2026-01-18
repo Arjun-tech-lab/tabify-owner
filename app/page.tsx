@@ -12,24 +12,26 @@ export default function OwnerDashboard() {
   const [activeTab, setActiveTab] = useState<"live" | "paid" | "unpaid">("live");
   const [orders, setOrders] = useState<any[]>([]);
   const [paidBills, setPaidBills] = useState<any[]>([]);
-  const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
+  const [toast, setToast] = useState<{
+    message: string;
+    type: "success" | "error";
+  } | null>(null);
 
   const socketRef = useRef<Socket | null>(null);
 
   useEffect(() => {
-    const SOCKET_URL = process.env.NEXT_PUBLIC_SOCKET_SERVER_URL || "http://localhost:5001";
-
-    const socket: Socket = io(SOCKET_URL, {
+    const socket: Socket = io("http://localhost:5001", {
       transports: ["websocket"],
     });
-
     socketRef.current = socket;
 
+    // 👑 Register as owner
     socket.on("connect", () => {
       console.log("✅ Owner connected:", socket.id);
       socket.emit("registerRole", "owner");
     });
 
+    // 🆕 New order
     socket.on("newOrder", (order) => {
       console.log("📦 New order received:", order);
       setOrders((prev) => {
@@ -38,27 +40,42 @@ export default function OwnerDashboard() {
       });
     });
 
+    // 🔁 Order updates (ACCEPTED / PAID)
     socket.on("orderUpdate", (updatedOrder) => {
       console.log("🔁 Order updated:", updatedOrder);
 
-      setOrders((prev) =>
-        prev.map((o) => (o.id === updatedOrder.id ? { ...o, ...updatedOrder } : o))
-      );
+      // ✅ REMOVE from Live Requests once accepted or completed
+      if (updatedOrder.status !== "requested") {
+        setOrders((prev) =>
+          prev.filter((o) => o.id !== updatedOrder.id)
+        );
+      } else {
+        setOrders((prev) =>
+          prev.map((o) =>
+            o.id === updatedOrder.id ? { ...o, ...updatedOrder } : o
+          )
+        );
+      }
 
+      // ✅ Paid bills handling
       if (updatedOrder.paymentStatus === "paid") {
         setPaidBills((prev) => {
           const exists = prev.find((b) => b.id === updatedOrder.id);
           return exists
-            ? prev.map((b) => (b.id === updatedOrder.id ? updatedOrder : b))
+            ? prev.map((b) =>
+                b.id === updatedOrder.id ? updatedOrder : b
+              )
             : [...prev, updatedOrder];
         });
       } else {
-        setPaidBills((prev) => prev.filter((b) => b.id !== updatedOrder.id));
+        setPaidBills((prev) =>
+          prev.filter((b) => b.id !== updatedOrder.id)
+        );
       }
     });
 
     socket.on("disconnect", () => {
-      console.log("❌ Owner disconnected");
+      console.log("❌ Owner disconnected:", socket.id);
     });
 
     return () => {
@@ -66,11 +83,13 @@ export default function OwnerDashboard() {
     };
   }, []);
 
+  // 👑 Owner actions
   const handleAcceptOrder = (id: string) => {
     if (!socketRef.current) return;
+
     console.log(`👑 Accepting order: ${id}`);
     socketRef.current.emit("acceptOrder", id);
-    setOrders((prev) => prev.filter((o) => o.id !== id));
+
     showToast("✅ Order accepted!", "success");
   };
 
@@ -81,6 +100,7 @@ export default function OwnerDashboard() {
 
   const handleMarkAsPaid = (id: string) => {
     if (!socketRef.current) return;
+
     console.log(`💳 Marking order ${id} as paid`);
     socketRef.current.emit("updatePaymentStatus", {
       orderId: id,
@@ -93,7 +113,10 @@ export default function OwnerDashboard() {
     setTimeout(() => setToast(null), 3000);
   };
 
-  const unpaidOrders = orders.filter((o) => o.paymentStatus !== "paid");
+  // ✅ Unpaid orders
+  const unpaidOrders = orders.filter(
+    (o) => o.paymentStatus !== "paid"
+  );
 
   return (
     <div className="min-h-screen bg-background">
@@ -110,7 +133,9 @@ export default function OwnerDashboard() {
             ].map((tab) => (
               <button
                 key={tab.id}
-                onClick={() => setActiveTab(tab.id as typeof activeTab)}
+                onClick={() =>
+                  setActiveTab(tab.id as typeof activeTab)
+                }
                 className={`py-4 px-2 font-medium text-sm relative transition-colors ${
                   activeTab === tab.id
                     ? "text-primary"
@@ -122,7 +147,11 @@ export default function OwnerDashboard() {
                   <motion.div
                     layoutId="tab-indicator"
                     className="absolute bottom-0 left-0 right-0 h-1 bg-primary rounded-t"
-                    transition={{ type: "spring", stiffness: 380, damping: 30 }}
+                    transition={{
+                      type: "spring",
+                      stiffness: 380,
+                      damping: 30,
+                    }}
                   />
                 )}
               </button>
@@ -142,7 +171,9 @@ export default function OwnerDashboard() {
               onDecline={handleDeclineOrder}
             />
           )}
-          {activeTab === "paid" && <PaidBills key="paid" bills={paidBills} />}
+          {activeTab === "paid" && (
+            <PaidBills key="paid" bills={paidBills} />
+          )}
           {activeTab === "unpaid" && (
             <UnpaidBills
               key="unpaid"
