@@ -1,91 +1,116 @@
-"use client"
+"use client";
 
-import { motion } from "framer-motion"
-import { Button } from "@/components/ui/button"
-import { Card } from "@/components/ui/card"
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+
+interface OrderItem {
+  name: string;
+  quantity: number;
+  price: number;
+}
 
 interface Order {
-  id: string
-  user: string
-  items: { name: string; quantity: number; price: number }[]
-  total: number
-  status: string
-  timestamp: string
+  _id: string;
+  userName: string;
+  items?: OrderItem[];
+  totalAmount: number;
+  createdAt: string;
 }
 
 interface LiveRequestsProps {
-  orders: Order[]
-  onAccept: (id: string) => void
-  onDecline: (id: string) => void
+  orders: any[]; // IMPORTANT: real data is mixed
+  onAccept: (id: string) => void;
+  onDecline: (id: string) => void;
 }
 
-export default function LiveRequests({ orders, onAccept, onDecline }: LiveRequestsProps) {
-  const containerVariants = {
-    hidden: { opacity: 0 },
-    show: {
-      opacity: 1,
-      transition: { staggerChildren: 0.1 },
-    },
-  }
+export default function LiveRequests({
+  orders,
+  onAccept,
+  onDecline,
+}: LiveRequestsProps) {
+  // ✅ HARD FILTER – THIS IS THE FIX
+  const safeOrders: Order[] = Array.isArray(orders)
+    ? orders.filter(
+        (o) =>
+          o &&
+          typeof o === "object" &&
+          typeof o._id === "string"
+      )
+    : [];
 
-  const itemVariants = {
-    hidden: { opacity: 0, y: 20 },
-    show: { opacity: 1, y: 0 },
-    exit: { opacity: 0, x: 100 },
+  if (safeOrders.length === 0) {
+    return (
+      <Card className="p-8 text-center bg-muted">
+        <p className="text-muted-foreground text-lg">
+          No live orders at the moment
+        </p>
+      </Card>
+    );
   }
 
   return (
-    <motion.div variants={containerVariants} initial="hidden" animate="show" className="space-y-4">
-      {orders.length === 0 ? (
-        <Card className="p-8 text-center bg-gradient-to-br from-muted to-muted/50">
-          <p className="text-muted-foreground text-lg">No live orders at the moment</p>
+    <div className="space-y-4">
+      {safeOrders.map((order) => (
+        <Card
+          key={order._id}
+          className="p-6 hover:shadow-lg transition-shadow duration-300"
+        >
+          <div className="flex items-start justify-between mb-4">
+            <div>
+              <h3 className="text-xl font-bold text-foreground">
+                {order.userName}
+              </h3>
+              <p className="text-sm text-muted-foreground mt-1">
+                📅 {new Date(order.createdAt).toLocaleString()}
+              </p>
+            </div>
+
+            <div className="text-right">
+              <p className="text-3xl font-bold text-primary">
+                ₹{order.totalAmount}
+              </p>
+            </div>
+          </div>
+
+          <div className="mb-4">
+            <p className="text-sm font-semibold text-muted-foreground mb-2">
+              Items:
+            </p>
+            <ul className="space-y-1">
+              {Array.isArray(order.items) ? (
+                order.items.map((item, idx) => (
+                  <li key={idx} className="text-foreground">
+                    • {item.name} × {item.quantity} — ₹
+                    {item.price * item.quantity}
+                  </li>
+                ))
+              ) : (
+                <li className="text-sm text-muted-foreground">
+                  No items available
+                </li>
+              )}
+            </ul>
+          </div>
+
+          <div className="flex gap-3">
+            <Button
+              type="button"
+              className="flex-1"
+              onClick={() => onAccept(order._id)}
+            >
+              ✅ Accept
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              className="flex-1"
+              onClick={() => onDecline(order._id)}
+            >
+              ❌ Decline
+            </Button>
+          </div>
         </Card>
-      ) : (
-        orders.map((order) => (
-          <motion.div key={order.id} variants={itemVariants} exit="exit">
-            <Card className="p-6 hover:shadow-lg transition-shadow duration-300">
-              <div className="flex items-start justify-between mb-4">
-                <div>
-                  <h3 className="text-xl font-bold text-foreground">{order.user}</h3>
-                  <p className="text-sm text-muted-foreground mt-1">
-                    📅 {new Date(order.timestamp).toLocaleString()}
-                  </p>
-                </div>
-                <div className="text-right">
-                  <p className="text-3xl font-bold text-primary">₹{order.total}</p>
-                </div>
-              </div>
-
-              <div className="mb-4">
-                <p className="text-sm font-semibold text-muted-foreground mb-2">Items:</p>
-                <ul className="space-y-1">
-                  {order.items.map((item, idx) => (
-                    <li key={idx} className="text-foreground">
-                      • {item.name} × {item.quantity} — ₹{item.price * item.quantity}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-
-              <div className="flex gap-3">
-                <Button
-                  onClick={() => onAccept(order.id)}
-                  className="flex-1 bg-primary hover:bg-primary/90 text-primary-foreground"
-                >
-                  ✅ Accept
-                </Button>
-                <Button
-                  onClick={() => onDecline(order.id)}
-                  variant="outline"
-                  className="flex-1"
-                >
-                  ❌ Decline
-                </Button>
-              </div>
-            </Card>
-          </motion.div>
-        ))
-      )}
-    </motion.div>
-  )
+      ))}
+    </div>
+  );
 }
