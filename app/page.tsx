@@ -26,33 +26,47 @@ interface Order {
   createdAt: string;
 }
 
+type Tab = "live" | "paid" | "unpaid" | "history";
+type PaginatedTab = Exclude<Tab, "live">;
+
 const BACKEND_URL =
   process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:5001";
 
+const LIMIT = 10;
+
+const endpointMap: Record<PaginatedTab, string> = {
+  history: "/api/orders/all",
+  paid: "/api/orders/paid",
+  unpaid: "/api/orders/unpaid",
+};
+
 export default function OwnerDashboard() {
-  const [activeTab, setActiveTab] = useState<
-    "live" | "paid" | "unpaid" | "history"
-  >("live");
+  const [activeTab, setActiveTab] = useState<Tab>("live");
+  const activeTabRef = useRef<Tab>(activeTab);
+
 
   const [liveOrders, setLiveOrders] = useState<Order[]>([]);
-  const [historyOrders, setHistoryOrders] = useState<Order[]>([]);
-  const [loadingHistory, setLoadingHistory] = useState(false);
+  const [orders, setOrders] = useState<Order[]>([]);
+
+  const [page, setPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [loading, setLoading] = useState(false);
 
   const socketRef = useRef<Socket | null>(null);
+  useEffect(() => {
+  activeTabRef.current = activeTab;
+}, [activeTab]);
+
 
   /* ================= SOCKET ================= */
   useEffect(() => {
-    const socket = io(BACKEND_URL, {
-      transports: ["websocket"],
-    });
-
+    const socket = io(BACKEND_URL, { transports: ["websocket"] });
     socketRef.current = socket;
 
     socket.on("connect", () => {
       socket.emit("registerRole", "owner");
     });
 
-    // 🔔 New incoming order
     socket.on("newOrder", (order: Order) => {
       if (order.status === "requested") {
         setLiveOrders((prev) =>
@@ -63,23 +77,54 @@ export default function OwnerDashboard() {
       }
     });
 
-    // 🔁 Order updated (accepted / paid / completed)
-    socket.on("orderUpdate", (updated: Order) => {
-      // remove from live
-      setLiveOrders((prev) =>
-        prev.filter((o) => o._id !== updated._id)
-      );
+   socket.on("orderUpdate", (updated: Order) => {
+  // remove from live
+  setLiveOrders((prev) =>
+    prev.filter((o) => o._id !== updated._id)
+  );
 
-      // update history instantly
-      setHistoryOrders((prev) => {
-        const exists = prev.find((o) => o._id === updated._id);
-        return exists
-          ? prev.map((o) =>
-              o._id === updated._id ? updated : o
-            )
-          : [updated, ...prev];
-      });
-    });
+  setOrders((prev) => {
+    const currentTab = activeTabRef.current;
+
+    // 🔥 UNPAID → PAID → REMOVE
+    if (
+      currentTab === "unpaid" &&
+      updated.paymentStatus === "paid"
+    ) {
+      return prev.filter((o) => o._id !== updated._id);
+    }
+
+    // 🔥 PAID tab → ADD / UPDATE
+    if (
+      currentTab === "paid" &&
+      updated.paymentStatus === "paid"
+    ) {
+      const exists = prev.find(
+        (o) => o._id === updated._id
+      );
+      return exists
+        ? prev.map((o) =>
+            o._id === updated._id ? updated : o
+          )
+        : [updated, ...prev];
+    }
+
+    // 🔥 HISTORY → ALWAYS UPDATE
+    if (currentTab === "history") {
+      const exists = prev.find(
+        (o) => o._id === updated._id
+      );
+      return exists
+        ? prev.map((o) =>
+            o._id === updated._id ? updated : o
+          )
+        : [updated, ...prev];
+    }
+
+    return prev;
+  });
+});
+
 
     return () => socket.disconnect();
   }, []);
@@ -100,30 +145,25 @@ export default function OwnerDashboard() {
     });
   };
 
-  /* ================= HISTORY (OWNER = ALL ORDERS) ================= */
+  /* ================= SERVER-SIDE PAGINATION ================= */
   useEffect(() => {
-    if (activeTab !== "history") return;
+    if (activeTab === "live") return;
 
-    setLoadingHistory(true);
+    const tab = activeTab as PaginatedTab;
+    const endpoint = endpointMap[tab];
 
-    fetch(`${BACKEND_URL}/api/orders/all`)
+    setLoading(true);
+
+    fetch(`${BACKEND_URL}${endpoint}?page=${page}&limit=${LIMIT}`)
       .then((res) => res.json())
       .then((data) => {
-        if (data.success) {
-          setHistoryOrders(data.orders);
-        }
+        if (!data?.success) return;
+
+        setOrders(data.orders);
+        setTotalPages(data.pagination?.totalPages ?? 1);
       })
-      .finally(() => setLoadingHistory(false));
-  }, [activeTab]);
-
-  /* ================= DERIVED ================= */
-  const unpaidOrders = historyOrders.filter(
-    (o) => o.paymentStatus === "unpaid"
-  );
-
-  const paidOrders = historyOrders.filter(
-    (o) => o.paymentStatus === "paid"
-  );
+      .finally(() => setLoading(false));
+  }, [activeTab, page]);
 
   /* ================= UI ================= */
   return (
@@ -141,9 +181,10 @@ export default function OwnerDashboard() {
           ].map((tab) => (
             <button
               key={tab.id}
-              onClick={() =>
-                setActiveTab(tab.id as typeof activeTab)
-              }
+              onClick={() => {
+                setActiveTab(tab.id as Tab);
+                setPage(1);
+              }}
               className="py-4 relative font-medium"
             >
               {tab.label}
@@ -169,16 +210,22 @@ export default function OwnerDashboard() {
             />
           )}
 
-          {activeTab === "paid" && (
-            <PaidBills bills={paidOrders} />
-          )}
+          {activeTab === "paid" &&
+            (loading ? (
+              <p>Loading paid bills…</p>
+            ) : (
+              <PaidBills bills={orders} />
+            ))}
 
-          {activeTab === "unpaid" && (
-            <UnpaidBills
-              orders={unpaidOrders}
-              onMarkAsPaid={handleMarkAsPaid}
-            />
-          )}
+          {activeTab === "unpaid" &&
+            (loading ? (
+              <p>Loading unpaid bills…</p>
+            ) : (
+              <UnpaidBills
+                orders={orders}
+                onMarkAsPaid={handleMarkAsPaid}
+              />
+            ))}
 
           {activeTab === "history" && (
             <motion.div className="space-y-6">
@@ -186,10 +233,10 @@ export default function OwnerDashboard() {
                 🧾 All Orders History
               </h2>
 
-              {loadingHistory && <p>Loading history...</p>}
+              {loading && <p>Loading…</p>}
 
-              {!loadingHistory &&
-                historyOrders.map((order) => (
+              {!loading &&
+                orders.map((order) => (
                   <div
                     key={order._id}
                     className="border rounded-2xl p-5 bg-card"
@@ -198,13 +245,57 @@ export default function OwnerDashboard() {
                     <p className="text-sm text-muted-foreground">
                       📞 {order.phone}
                     </p>
-                    <p>Status: {order.status}</p>
-                    <p>Total: ₹{order.totalAmount}</p>
+                    <p className="text-xs text-muted-foreground">
+                      📅 {new Date(order.createdAt).toLocaleString()}
+                    </p>
+
+                    <div className="flex justify-between mt-3">
+                      <p>
+                        Payment:{" "}
+                        <span
+                          className={`font-semibold ${
+                            order.paymentStatus === "paid"
+                              ? "text-green-600"
+                              : "text-yellow-600"
+                          }`}
+                        >
+                          {order.paymentStatus.toUpperCase()}
+                        </span>
+                      </p>
+                      <p className="font-bold">
+                        ₹{order.totalAmount}
+                      </p>
+                    </div>
                   </div>
                 ))}
             </motion.div>
           )}
         </AnimatePresence>
+
+        {/* Pagination */}
+        {activeTab !== "live" && (
+          <div className="flex justify-center gap-4 mt-6">
+            <button
+              disabled={page === 1}
+              onClick={() => setPage((p) => p - 1)}
+              className="px-4 py-2 border rounded disabled:opacity-50"
+            >
+              Previous
+            </button>
+
+            <span className="px-4 py-2">
+              Page {page} / {totalPages}
+            </span>
+
+            <button
+              disabled={page >= totalPages}
+              onClick={() => setPage((p) => p + 1)}
+              className="px-4 py-2 border rounded disabled:opacity-50"
+            >
+              Next
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );
