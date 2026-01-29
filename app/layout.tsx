@@ -1,28 +1,19 @@
-import type { Metadata } from 'next'
-import { Geist, Geist_Mono } from 'next/font/google'
-import { Analytics } from '@vercel/analytics/next'
-import './globals.css'
+import "./globals.css";
+import { GeistSans, GeistMono } from "geist/font";
 
-const _geist = Geist({ subsets: ["latin"] });
-const _geistMono = Geist_Mono({ subsets: ["latin"] });
-
-export const metadata: Metadata = {
-  title: 'Tabify - owner',
-  description: '',
-  generator: 'v0.app',
-}
+export const metadata = {
+  title: "Tabify Owner",
+  description: "Owner dashboard",
+};
 
 export default function RootLayout({
   children,
-}: Readonly<{
-  children: React.ReactNode
-}>) {
+}: {
+  children: React.ReactNode;
+}) {
   return (
-    <html lang="en">
-      <body className={`font-sans antialiased`}>
-        {children}
-        <Analytics />
-      </body>
+    <html lang="en" className={`${GeistSans.className} ${GeistMono.className}`}>
+      <body>{children}</body>
     </html>
-  )
+  );
 }
