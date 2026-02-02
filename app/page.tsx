@@ -26,7 +26,7 @@ interface Order {
   createdAt: string;
 }
 
-type Tab = "live" | "paid" | "unpaid" | "history";
+type Tab = "live" | "paid" | "unpaid" | "history" | "balance";
 type PaginatedTab = Exclude<Tab, "live">;
 
 const BACKEND_URL =
@@ -42,7 +42,18 @@ const endpointMap: Record<PaginatedTab, string> = {
 
 export default function OwnerDashboard() {
   const [activeTab, setActiveTab] = useState<Tab>("live");
+  const [search, setSearch] = useState("");
+  const [confirmUser, setConfirmUser] = useState<null | {
+  id: string;
+  name: string;
+  amount: number;
+}>(null);
+
+
+
+  const socketRef = useRef<Socket | null>(null);
   const activeTabRef = useRef<Tab>(activeTab);
+  const [balances, setBalances] = useState([]);
 
 
   const [liveOrders, setLiveOrders] = useState<Order[]>([]);
@@ -51,11 +62,29 @@ export default function OwnerDashboard() {
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [loading, setLoading] = useState(false);
-
-  const socketRef = useRef<Socket | null>(null);
+  
   useEffect(() => {
-  activeTabRef.current = activeTab;
-}, [activeTab]);
+  if (activeTab !== "balance") return;
+
+  setLoading(true);
+
+  const params = new URLSearchParams({
+    page: String(page),
+    limit: String(LIMIT),
+    search
+  });
+
+  fetch(`${BACKEND_URL}/api/orders/balances?${params.toString()}`)
+    .then(res => res.json())
+    .then(data => {
+      if (!data?.success) return;
+
+      setBalances(data.balances);
+      setTotalPages(data.pagination.totalPages);
+    })
+    .finally(() => setLoading(false));
+}, [activeTab, page, search]);
+
 
 
   /* ================= SOCKET ================= */
@@ -144,26 +173,56 @@ export default function OwnerDashboard() {
       paymentStatus: "paid",
     });
   };
+  
+  const handleMarkBalanceAsPaid = async (userId: string) => {
+  try {
+    const res = await fetch(
+      `${BACKEND_URL}/api/orders/balances/mark-paid`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId }),
+      }
+    );
+
+    const data = await res.json();
+    if (!data.success) return;
+
+    // ✅ remove customer from balances
+    setBalances((prev: any[]) =>
+      prev.filter((b) => b._id !== userId)
+    );
+  } catch (err) {
+    console.error("Mark balance paid failed", err);
+  }
+};
+
 
   /* ================= SERVER-SIDE PAGINATION ================= */
   useEffect(() => {
-    if (activeTab === "live") return;
+  if (
+    activeTab === "live" ||
+    activeTab === "balance"
+  ) {
+    return;
+  }
 
-    const tab = activeTab as PaginatedTab;
-    const endpoint = endpointMap[tab];
+  const endpoint = endpointMap[activeTab as PaginatedTab];
+  if (!endpoint) return;
 
-    setLoading(true);
+  setLoading(true);
 
-    fetch(`${BACKEND_URL}${endpoint}?page=${page}&limit=${LIMIT}`)
-      .then((res) => res.json())
-      .then((data) => {
-        if (!data?.success) return;
+  fetch(`${BACKEND_URL}${endpoint}?page=${page}&limit=${LIMIT}`)
+    .then((res) => res.json())
+    .then((data) => {
+      if (!data?.success) return;
 
-        setOrders(data.orders);
-        setTotalPages(data.pagination?.totalPages ?? 1);
-      })
-      .finally(() => setLoading(false));
-  }, [activeTab, page]);
+      setOrders(data.orders);
+      setTotalPages(data.pagination?.totalPages ?? 1);
+    })
+    .finally(() => setLoading(false));
+}, [activeTab, page]);
+
 
   /* ================= UI ================= */
   return (
@@ -178,6 +237,7 @@ export default function OwnerDashboard() {
             { id: "paid", label: "Paid Bills" },
             { id: "unpaid", label: "Unpaid Bills" },
             { id: "history", label: "History" },
+            {id: "balance",label: "Balance" },
           ].map((tab) => (
             <button
               key={tab.id}
@@ -209,6 +269,59 @@ export default function OwnerDashboard() {
               onDecline={handleDeclineOrder}
             />
           )}
+          <AnimatePresence>
+  {confirmUser && (
+    <motion.div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+    >
+      <motion.div
+        className="bg-card rounded-2xl p-6 w-full max-w-sm shadow-xl"
+        initial={{ scale: 0.9, opacity: 0 }}
+        animate={{ scale: 1, opacity: 1 }}
+        exit={{ scale: 0.9, opacity: 0 }}
+      >
+        <h3 className="text-lg font-semibold mb-2">
+          Confirm payment
+        </h3>
+
+        <p className="text-sm text-muted-foreground mb-4">
+          Mark <strong>{confirmUser.name}</strong>’s outstanding balance as
+          paid?
+        </p>
+
+        <div className="flex justify-between items-center mb-6">
+          <span className="text-sm">Amount due</span>
+          <span className="text-lg font-bold text-red-600">
+            ₹{confirmUser.amount}
+          </span>
+        </div>
+
+        <div className="flex gap-3">
+          <button
+            onClick={() => setConfirmUser(null)}
+            className="flex-1 px-4 py-2 border rounded-lg hover:bg-muted"
+          >
+            Cancel
+          </button>
+
+          <button
+            onClick={() => {
+              handleMarkBalanceAsPaid(confirmUser.id);
+              setConfirmUser(null);
+            }}
+            className="flex-1 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700"
+          >
+            Confirm
+          </button>
+        </div>
+      </motion.div>
+    </motion.div>
+  )}
+</AnimatePresence>
+
 
           {activeTab === "paid" &&
             (loading ? (
@@ -270,6 +383,69 @@ export default function OwnerDashboard() {
                 ))}
             </motion.div>
           )}
+          {activeTab === "balance" && (
+  <div className="space-y-4">
+    <h2 className="text-2xl font-bold">💰 Customer Balances</h2>
+
+    {/* 🔍 Search */}
+    <input
+      type="text"
+      placeholder="Search by customer name..."
+      value={search}
+      onChange={(e) => {
+        setSearch(e.target.value);
+        setPage(1); // reset pagination on search
+      }}
+      className="w-full max-w-md px-4 py-2 border rounded-lg"
+    />
+
+    {balances.length === 0 ? (
+  <p>No matching customers</p>
+) : (
+  balances.map((b: any) => (
+    <div
+      key={b._id}
+      className="border rounded-xl p-4 flex justify-between items-center"
+    >
+      {/* LEFT: Customer info */}
+      <div>
+        <p className="font-semibold">{b.userName}</p>
+        <p className="text-sm text-muted-foreground">
+          📞 {b.phone}
+        </p>
+      </div>
+
+      {/* RIGHT: Amount + action */}
+      <div className="flex items-center gap-4">
+        <p className="text-xl font-bold text-red-600">
+          ₹{b.totalDue}
+        </p>
+
+       <button
+  onClick={() =>
+    setConfirmUser({
+      id: b._id,
+      name: b.userName,
+      amount: b.totalDue,
+    })
+  }
+  className="px-3 py-1.5 text-sm font-medium
+             bg-green-600 text-white rounded-md
+             hover:bg-green-700 transition"
+>
+  ✓ Paid
+</button>
+
+
+      </div>
+    </div>
+  ))
+)}
+
+  </div>
+)}
+
+
         </AnimatePresence>
 
         {/* Pagination */}
