@@ -226,253 +226,238 @@ export default function OwnerDashboard() {
 
   /* ================= UI ================= */
   return (
-    <div className="min-h-screen bg-background">
-      <DashboardHeader />
+  <div className="min-h-screen bg-background">
+    <DashboardHeader />
 
-      {/* Tabs */}
-      <div className="border-b bg-card sticky top-0 z-10">
-        <div className="max-w-7xl mx-auto px-6 flex gap-8">
-          {[
-            { id: "live", label: "Live Requests" },
-            { id: "paid", label: "Paid Bills" },
-            { id: "unpaid", label: "Unpaid Bills" },
-            { id: "history", label: "History" },
-            {id: "balance",label: "Balance" },
-          ].map((tab) => (
-            <button
-              key={tab.id}
-              onClick={() => {
-                setActiveTab(tab.id as Tab);
+    {/* Tabs */}
+    <div className="border-b bg-card sticky top-0 z-10">
+      <div className="max-w-7xl mx-auto px-6 flex gap-8">
+        {[
+          { id: "live", label: "Live Requests" },
+          { id: "paid", label: "Paid Bills" },
+          { id: "unpaid", label: "Unpaid Bills" },
+          { id: "history", label: "History" },
+          { id: "balance", label: "Balance" },
+        ].map((tab) => (
+          <button
+            key={tab.id}
+            onClick={() => {
+              setActiveTab(tab.id as Tab);
+              setPage(1);
+            }}
+            className="py-4 relative font-medium"
+          >
+            {tab.label}
+            {activeTab === tab.id && (
+              <motion.div
+                layoutId="tab"
+                className="absolute bottom-0 left-0 right-0 h-1 bg-primary"
+              />
+            )}
+          </button>
+        ))}
+      </div>
+    </div>
+
+    {/* Content */}
+    <div className="max-w-7xl mx-auto px-6 py-8">
+      <AnimatePresence mode="wait">
+        {activeTab === "live" && (
+          <LiveRequests
+            orders={liveOrders}
+            onAccept={handleAcceptOrder}
+            onDecline={handleDeclineOrder}
+          />
+        )}
+
+        {activeTab === "paid" &&
+          (loading ? <p>Loading paid bills…</p> : <PaidBills bills={orders} />)}
+
+        {activeTab === "unpaid" &&
+          (loading ? (
+            <p>Loading unpaid bills…</p>
+          ) : (
+            <UnpaidBills orders={orders} onMarkAsPaid={handleMarkAsPaid} />
+          ))}
+
+        {activeTab === "history" && (
+          <motion.div className="space-y-6">
+            <h2 className="text-2xl font-bold text-primary">
+              🧾 All Orders History
+            </h2>
+
+            {loading && <p>Loading…</p>}
+
+            {!loading &&
+              orders.map((order) => (
+                <div
+                  key={order._id}
+                  className="border rounded-2xl p-5 bg-card"
+                >
+                  <p className="font-semibold">{order.userName}</p>
+                  <p className="text-sm text-muted-foreground">
+                    📞 {order.phone}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    📅 {new Date(order.createdAt).toLocaleString()}
+                  </p>
+
+                  <div className="flex justify-between mt-3">
+                    <p>
+                      Payment:{" "}
+                      <span
+                        className={`font-semibold ${
+                          order.paymentStatus === "paid"
+                            ? "text-green-600"
+                            : "text-yellow-600"
+                        }`}
+                      >
+                        {order.paymentStatus.toUpperCase()}
+                      </span>
+                    </p>
+                    <p className="font-bold">₹{order.totalAmount}</p>
+                  </div>
+                </div>
+              ))}
+          </motion.div>
+        )}
+
+        {activeTab === "balance" && (
+          <div className="space-y-4">
+            <h2 className="text-2xl font-bold">💰 Customer Balances</h2>
+
+            <input
+              type="text"
+              placeholder="Search by customer name..."
+              value={search}
+              onChange={(e) => {
+                setSearch(e.target.value);
                 setPage(1);
               }}
-              className="py-4 relative font-medium"
-            >
-              {tab.label}
-              {activeTab === tab.id && (
-                <motion.div
-                  layoutId="tab"
-                  className="absolute bottom-0 left-0 right-0 h-1 bg-primary"
-                />
-              )}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* Content */}
-      <div className="max-w-7xl mx-auto px-6 py-8">
-        <AnimatePresence mode="wait">
-          {activeTab === "live" && (
-            <LiveRequests
-              orders={liveOrders}
-              onAccept={handleAcceptOrder}
-              onDecline={handleDeclineOrder}
+              className="w-full max-w-md px-4 py-2 border rounded-lg"
             />
-          )}
-          <AnimatePresence>
-  {confirmUser && (
-    <motion.div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
-    >
-      <motion.div
-        className="bg-card rounded-2xl p-6 w-full max-w-sm shadow-xl"
-        initial={{ scale: 0.9, opacity: 0 }}
-        animate={{ scale: 1, opacity: 1 }}
-        exit={{ scale: 0.9, opacity: 0 }}
-      >
-        <h3 className="text-lg font-semibold mb-2">
-          Confirm payment
-        </h3>
 
-        <p className="text-sm text-muted-foreground mb-4">
-          Mark <strong>{confirmUser.name}</strong>’s outstanding balance as
-          paid?
-        </p>
-
-        <div className="flex justify-between items-center mb-6">
-          <span className="text-sm">Amount due</span>
-          <span className="text-lg font-bold text-red-600">
-            ₹{confirmUser.amount}
-          </span>
-        </div>
-
-        <div className="flex gap-3">
-          <button
-            onClick={() => setConfirmUser(null)}
-            className="flex-1 px-4 py-2 border rounded-lg hover:bg-muted"
-          >
-            Cancel
-          </button>
-
-          <button
-            onClick={() => {
-              handleMarkBalanceAsPaid(confirmUser.id);
-              setConfirmUser(null);
-            }}
-            className="flex-1 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700"
-          >
-            Confirm
-          </button>
-        </div>
-      </motion.div>
-    </motion.div>
-  )}
-</AnimatePresence>
-
-
-          {activeTab === "paid" &&
-            (loading ? (
-              <p>Loading paid bills…</p>
+            {balances.length === 0 ? (
+              <p>No matching customers</p>
             ) : (
-              <PaidBills bills={orders} />
-            ))}
-
-          {activeTab === "unpaid" &&
-            (loading ? (
-              <p>Loading unpaid bills…</p>
-            ) : (
-              <UnpaidBills
-                orders={orders}
-                onMarkAsPaid={handleMarkAsPaid}
-              />
-            ))}
-
-          {activeTab === "history" && (
-            <motion.div className="space-y-6">
-              <h2 className="text-2xl font-bold text-primary">
-                🧾 All Orders History
-              </h2>
-
-              {loading && <p>Loading…</p>}
-
-              {!loading &&
-                orders.map((order) => (
-                  <div
-                    key={order._id}
-                    className="border rounded-2xl p-5 bg-card"
-                  >
-                    <p className="font-semibold">{order.userName}</p>
+              balances.map((b: any) => (
+                <div
+                  key={b._id}
+                  className="border rounded-xl p-4 flex justify-between items-center"
+                >
+                  <div>
+                    <p className="font-semibold">{b.userName}</p>
                     <p className="text-sm text-muted-foreground">
-                      📞 {order.phone}
+                      📞 {b.phone}
                     </p>
-                    <p className="text-xs text-muted-foreground">
-                      📅 {new Date(order.createdAt).toLocaleString()}
-                    </p>
-
-                    <div className="flex justify-between mt-3">
-                      <p>
-                        Payment:{" "}
-                        <span
-                          className={`font-semibold ${
-                            order.paymentStatus === "paid"
-                              ? "text-green-600"
-                              : "text-yellow-600"
-                          }`}
-                        >
-                          {order.paymentStatus.toUpperCase()}
-                        </span>
-                      </p>
-                      <p className="font-bold">
-                        ₹{order.totalAmount}
-                      </p>
-                    </div>
                   </div>
-                ))}
-            </motion.div>
-          )}
-          {activeTab === "balance" && (
-  <div className="space-y-4">
-    <h2 className="text-2xl font-bold">💰 Customer Balances</h2>
 
-    {/* 🔍 Search */}
-    <input
-      type="text"
-      placeholder="Search by customer name..."
-      value={search}
-      onChange={(e) => {
-        setSearch(e.target.value);
-        setPage(1); // reset pagination on search
-      }}
-      className="w-full max-w-md px-4 py-2 border rounded-lg"
-    />
+                  <div className="flex items-center gap-4">
+                    <p className="text-xl font-bold text-red-600">
+                      ₹{b.totalDue}
+                    </p>
 
-    {balances.length === 0 ? (
-  <p>No matching customers</p>
-) : (
-  balances.map((b: any) => (
-    <div
-      key={b._id}
-      className="border rounded-xl p-4 flex justify-between items-center"
-    >
-      {/* LEFT: Customer info */}
-      <div>
-        <p className="font-semibold">{b.userName}</p>
-        <p className="text-sm text-muted-foreground">
-          📞 {b.phone}
-        </p>
-      </div>
-
-      {/* RIGHT: Amount + action */}
-      <div className="flex items-center gap-4">
-        <p className="text-xl font-bold text-red-600">
-          ₹{b.totalDue}
-        </p>
-
-       <button
-  onClick={() =>
-    setConfirmUser({
-      id: b._id,
-      name: b.userName,
-      amount: b.totalDue,
-    })
-  }
-  className="px-3 py-1.5 text-sm font-medium
-             bg-green-600 text-white rounded-md
-             hover:bg-green-700 transition"
->
-  ✓ Paid
-</button>
-
-
-      </div>
-    </div>
-  ))
-)}
-
-  </div>
-)}
-
-
-        </AnimatePresence>
-
-        {/* Pagination */}
-        {activeTab !== "live" && (
-          <div className="flex justify-center gap-4 mt-6">
-            <button
-              disabled={page === 1}
-              onClick={() => setPage((p) => p - 1)}
-              className="px-4 py-2 border rounded disabled:opacity-50"
-            >
-              Previous
-            </button>
-
-            <span className="px-4 py-2">
-              Page {page} / {totalPages}
-            </span>
-
-            <button
-              disabled={page >= totalPages}
-              onClick={() => setPage((p) => p + 1)}
-              className="px-4 py-2 border rounded disabled:opacity-50"
-            >
-              Next
-            </button>
+                    <button
+                      onClick={() =>
+                        setConfirmUser({
+                          id: b._id,
+                          name: b.userName,
+                          amount: b.totalDue,
+                        })
+                      }
+                      className="px-3 py-1.5 text-sm font-medium
+                                 bg-green-600 text-white rounded-md
+                                 hover:bg-green-700 transition"
+                    >
+                      ✓ Paid
+                    </button>
+                  </div>
+                </div>
+              ))
+            )}
           </div>
         )}
-      </div>
+      </AnimatePresence>
+
+      {/* Pagination */}
+      {activeTab !== "live" && (
+        <div className="flex justify-center gap-4 mt-6">
+          <button
+            disabled={page === 1}
+            onClick={() => setPage((p) => p - 1)}
+            className="px-4 py-2 border rounded disabled:opacity-50"
+          >
+            Previous
+          </button>
+
+          <span className="px-4 py-2">
+            Page {page} / {totalPages}
+          </span>
+
+          <button
+            disabled={page >= totalPages}
+            onClick={() => setPage((p) => p + 1)}
+            className="px-4 py-2 border rounded disabled:opacity-50"
+          >
+            Next
+          </button>
+        </div>
+      )}
     </div>
-  );
+
+    {/* ✅ GLOBAL CONFIRM MODAL (FIXED FOR MOBILE) */}
+    <AnimatePresence>
+      {confirmUser && (
+        <motion.div
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 px-4"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+        >
+          <motion.div
+            className="bg-card rounded-2xl p-6 w-full max-w-sm shadow-xl"
+            initial={{ scale: 0.9, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            exit={{ scale: 0.9, opacity: 0 }}
+          >
+            <h3 className="text-lg font-semibold mb-2">
+              Confirm payment
+            </h3>
+
+            <p className="text-sm text-muted-foreground mb-4">
+              Mark <strong>{confirmUser.name}</strong>’s balance as paid?
+            </p>
+
+            <div className="flex justify-between items-center mb-6">
+              <span className="text-sm">Amount</span>
+              <span className="text-lg font-bold text-red-600">
+                ₹{confirmUser.amount}
+              </span>
+            </div>
+
+            <div className="flex gap-3">
+              <button
+                onClick={() => setConfirmUser(null)}
+                className="flex-1 px-4 py-2 border rounded-lg"
+              >
+                Cancel
+              </button>
+
+              <button
+                onClick={() => {
+                  handleMarkBalanceAsPaid(confirmUser.id);
+                  setConfirmUser(null);
+                }}
+                className="flex-1 px-4 py-2 bg-green-600 text-white rounded-lg"
+              >
+                Confirm
+              </button>
+            </div>
+          </motion.div>
+        </motion.div>
+      )}
+    </AnimatePresence>
+  </div>
+);
+
 }
