@@ -7,6 +7,8 @@ import DashboardHeader from "@/components/dashboard-header";
 import LiveRequests from "@/components/live-requests";
 import PaidBills from "@/components/paid-bills";
 import UnpaidBills from "@/components/unpaid-bills";
+import { useRouter } from "next/navigation";
+
 
 /* ================= TYPES ================= */
 interface OrderItem {
@@ -48,7 +50,32 @@ export default function OwnerDashboard() {
   name: string;
   amount: number;
 }>(null);
+const [hasNewLive, setHasNewLive] = useState(false);
 
+const [ledgerUser, setLedgerUser] = useState<null | {
+  id: string;
+  name: string;
+}>(null);
+const router = useRouter();
+
+const [ledger, setLedger] = useState<any[]>([]);
+const [ledgerBalance, setLedgerBalance] = useState(0);
+useEffect(() => {
+  activeTabRef.current = activeTab;
+}, [activeTab]);
+
+
+useEffect(() => {
+  if (!ledgerUser) return;
+
+  fetch(`${BACKEND_URL}/api/orders/ledger/${ledgerUser.id}`)
+    .then((res) => res.json())
+    .then((data) => {
+      if (!data.success) return;
+      setLedger(data.ledger);
+      setLedgerBalance(data.balance);
+    });
+}, [ledgerUser]);
 
 
   const socketRef = useRef<Socket | null>(null);
@@ -103,6 +130,9 @@ export default function OwnerDashboard() {
             ? prev
             : [order, ...prev]
         );
+         if (activeTabRef.current !== "live") {
+      setHasNewLive(true);
+    }
       }
     });
 
@@ -230,34 +260,49 @@ export default function OwnerDashboard() {
     <DashboardHeader />
 
     {/* Tabs */}
-    <div className="border-b bg-card sticky top-0 z-10">
-      <div className="max-w-7xl mx-auto px-6 flex gap-8">
-        {[
-          { id: "live", label: "Live Requests" },
-          { id: "paid", label: "Paid Bills" },
-          { id: "unpaid", label: "Unpaid Bills" },
-          { id: "history", label: "History" },
-          { id: "balance", label: "Balance" },
-        ].map((tab) => (
-          <button
-            key={tab.id}
-            onClick={() => {
-              setActiveTab(tab.id as Tab);
-              setPage(1);
-            }}
-            className="py-4 relative font-medium"
-          >
-            {tab.label}
-            {activeTab === tab.id && (
-              <motion.div
-                layoutId="tab"
-                className="absolute bottom-0 left-0 right-0 h-1 bg-primary"
-              />
-            )}
-          </button>
-        ))}
-      </div>
-    </div>
+<div className="border-b bg-card sticky top-0 z-10">
+  <div className="max-w-7xl mx-auto px-6 flex gap-8">
+    {[
+      { id: "live", label: "Live Requests" },
+      { id: "paid", label: "Paid Bills" },
+      { id: "unpaid", label: "Unpaid Bills" },
+      { id: "history", label: "History" },
+      { id: "balance", label: "Balance" },
+    ].map((tab) => (
+      <button
+        key={tab.id}
+        onClick={() => {
+          setActiveTab(tab.id as Tab);
+          setPage(1);
+
+          // 🔴 clear red dot when Live tab is opened
+          if (tab.id === "live") {
+            setHasNewLive(false);
+          }
+        }}
+        className="py-4 relative font-medium"
+      >
+        {/* Label + Red Dot */}
+        <span className="relative inline-flex items-center">
+          {tab.label}
+
+          {/* 🔴 Red dot indicator */}
+          {tab.id === "live" && hasNewLive && activeTab !== "live" && (
+            <span className="absolute -top-1 -right-3 w-2.5 h-2.5 bg-red-500 rounded-full" />
+          )}
+        </span>
+
+        {/* Active underline */}
+        {activeTab === tab.id && (
+          <motion.div
+            layoutId="tab"
+            className="absolute bottom-0 left-0 right-0 h-1 bg-primary"
+          />
+        )}
+      </button>
+    ))}
+  </div>
+</div>
 
     {/* Content */}
     <div className="max-w-7xl mx-auto px-6 py-8">
@@ -343,6 +388,7 @@ export default function OwnerDashboard() {
               balances.map((b: any) => (
                 <div
                   key={b._id}
+                  onClick={() => router.push(`/owner/ledger/${b._id}`)}
                   className="border rounded-xl p-4 flex justify-between items-center"
                 >
                   <div>
