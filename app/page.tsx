@@ -28,7 +28,7 @@ interface Order {
   createdAt: string;
 }
 
-type Tab = "live" | "paid" | "unpaid" | "history" | "balance";
+type Tab = "live" | "paid" | "unpaid" | "history" | "balance" | "settle";
 type PaginatedTab = Exclude<Tab, "live">;
 
 const BACKEND_URL =
@@ -36,7 +36,7 @@ const BACKEND_URL =
 
 const LIMIT = 10;
 
-const endpointMap: Record<PaginatedTab, string> = {
+const endpointMap: Partial<Record<PaginatedTab, string>> = {
   history: "/api/orders/all",
   paid: "/api/orders/paid",
   unpaid: "/api/orders/unpaid",
@@ -45,12 +45,17 @@ const endpointMap: Record<PaginatedTab, string> = {
 export default function OwnerDashboard() {
   const [activeTab, setActiveTab] = useState<Tab>("live");
   const [search, setSearch] = useState("");
-  const [confirmUser, setConfirmUser] = useState<null | {
+const [hasNewLive, setHasNewLive] = useState(false);
+
+const [settleUser, setSettleUser] = useState<null | {
   id: string;
   name: string;
-  amount: number;
+  maxAmount: number;
 }>(null);
-const [hasNewLive, setHasNewLive] = useState(false);
+const [settleAmountInput, setSettleAmountInput] = useState("");
+const [recentSettlements, setRecentSettlements] = useState<
+  Record<string, { amount: number; remaining: number }>
+>({});
 
 const [ledgerUser, setLedgerUser] = useState<null | {
   id: string;
@@ -86,12 +91,31 @@ useEffect(() => {
   const [liveOrders, setLiveOrders] = useState<Order[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
 
+  const [paidDate, setPaidDate] = useState("");
+  const [paidTotalForDate, setPaidTotalForDate] = useState(0);
+  const [paidTotalAllTime, setPaidTotalAllTime] = useState(0);
+
+  // When entering Paid tab for the first time, default to today's date
+  useEffect(() => {
+    if (activeTab === "paid" && !paidDate) {
+      const today = new Date();
+const localISO = new Date(
+  today.getTime() - today.getTimezoneOffset() * 60000
+)
+  .toISOString()
+  .slice(0, 10);
+
+setPaidDate(localISO);
+    
+    }
+  }, [activeTab, paidDate]);
+
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [loading, setLoading] = useState(false);
   
   useEffect(() => {
-  if (activeTab !== "balance") return;
+  if (activeTab !== "balance" && activeTab !== "settle") return;
 
   setLoading(true);
 
@@ -197,42 +221,47 @@ useEffect(() => {
     setLiveOrders((prev) => prev.filter((o) => o._id !== id));
   };
 
-  const handleMarkAsPaid = (id: string) => {
-    socketRef.current?.emit("updatePaymentStatus", {
-      orderId: id,
-      paymentStatus: "paid",
-    });
+  const handlePartialSettle = async (userId: string, amount: number) => {
+    try {
+      const res = await fetch(
+        `${BACKEND_URL}/api/orders/balances/settle`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ userId, amount }),
+        }
+      );
+
+      const data = await res.json();
+      if (!data?.success) return;
+
+      const settled = data.amountSettled;
+      const remaining = data.newBalance;
+
+      setBalances((prev: any[]) =>
+        prev.map((b) =>
+          b._id === userId ? { ...b, totalDue: remaining } : b
+        )
+      );
+
+      setRecentSettlements((prev) => ({
+        ...prev,
+        [userId]: {
+          amount: settled,
+          remaining,
+        },
+      }));
+    } catch (err) {
+      console.error("Partial settle failed", err);
+    }
   };
-  
-  const handleMarkBalanceAsPaid = async (userId: string) => {
-  try {
-    const res = await fetch(
-      `${BACKEND_URL}/api/orders/balances/mark-paid`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId }),
-      }
-    );
-
-    const data = await res.json();
-    if (!data.success) return;
-
-    // ✅ remove customer from balances
-    setBalances((prev: any[]) =>
-      prev.filter((b) => b._id !== userId)
-    );
-  } catch (err) {
-    console.error("Mark balance paid failed", err);
-  }
-};
-
 
   /* ================= SERVER-SIDE PAGINATION ================= */
   useEffect(() => {
   if (
     activeTab === "live" ||
-    activeTab === "balance"
+    activeTab === "balance" ||
+    activeTab === "settle"
   ) {
     return;
   }
@@ -242,16 +271,27 @@ useEffect(() => {
 
   setLoading(true);
 
-  fetch(`${BACKEND_URL}${endpoint}?page=${page}&limit=${LIMIT}`)
+  let url = `${BACKEND_URL}${endpoint}?page=${page}&limit=${LIMIT}`;
+
+  if (activeTab === "paid" && paidDate) {
+    url += `&date=${encodeURIComponent(paidDate)}`;
+  }
+
+  fetch(url)
     .then((res) => res.json())
     .then((data) => {
       if (!data?.success) return;
 
       setOrders(data.orders);
       setTotalPages(data.pagination?.totalPages ?? 1);
+
+      if (activeTab === "paid") {
+        setPaidTotalForDate(data.totals?.totalForDate ?? 0);
+        setPaidTotalAllTime(data.totals?.totalAllTime ?? 0);
+      }
     })
     .finally(() => setLoading(false));
-}, [activeTab, page]);
+}, [activeTab, page, paidDate]);
 
 
   /* ================= UI ================= */
@@ -260,7 +300,7 @@ useEffect(() => {
     <DashboardHeader />
 
     {/* Tabs */}
-<div className="border-b bg-card sticky top-0 z-10">
+    <div className="border-b bg-card sticky top-0 z-10">
   <div className="max-w-7xl mx-auto px-6 flex gap-8">
     {[
       { id: "live", label: "Live Requests" },
@@ -268,6 +308,7 @@ useEffect(() => {
       { id: "unpaid", label: "Unpaid Bills" },
       { id: "history", label: "History" },
       { id: "balance", label: "Balance" },
+      { id: "settle", label: "Settle" },
     ].map((tab) => (
       <button
         key={tab.id}
@@ -315,14 +356,47 @@ useEffect(() => {
           />
         )}
 
-        {activeTab === "paid" &&
-          (loading ? <p>Loading paid bills…</p> : <PaidBills bills={orders} />)}
+        {activeTab === "paid" && (
+          <div className="space-y-4">
+            <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4">
+              <div>
+                <label className="block text-sm font-medium mb-1">
+                  Select date
+                </label>
+                <input
+                  type="date"
+                  value={paidDate}
+                  onChange={(e) => {
+                    setPaidDate(e.target.value);
+                    setPage(1);
+                  }}
+                  className="px-3 py-2 border rounded-lg"
+                />
+              </div>
+
+              <div className="text-sm md:text-right space-y-1">
+                <p className="font-semibold">
+                  Collected on this day: ₹{paidTotalForDate}
+                </p>
+                <p className="text-muted-foreground">
+                  Total collected overall: ₹{paidTotalAllTime}
+                </p>
+              </div>
+            </div>
+
+            {loading ? (
+              <p>Loading paid bills…</p>
+            ) : (
+              <PaidBills bills={orders} />
+            )}
+          </div>
+        )}
 
         {activeTab === "unpaid" &&
           (loading ? (
             <p>Loading unpaid bills…</p>
           ) : (
-            <UnpaidBills orders={orders} onMarkAsPaid={handleMarkAsPaid} />
+            <UnpaidBills orders={orders} />
           ))}
 
         {activeTab === "history" && (
@@ -396,6 +470,53 @@ useEffect(() => {
                     <p className="text-sm text-muted-foreground">
                       📞 {b.phone}
                     </p>
+                    {recentSettlements[b._id] && (
+                      <p className="text-xs text-green-700 mt-1">
+                        Settled ₹{recentSettlements[b._id].amount} · Remaining ₹
+                        {recentSettlements[b._id].remaining}
+                      </p>
+                    )}
+                  </div>
+
+                  <div className="flex items-center gap-4">
+                    <p className="text-xl font-bold text-red-600">
+                      ₹{b.totalDue}
+                    </p>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        )}
+
+        {activeTab === "settle" && (
+          <div className="space-y-4">
+            <h2 className="text-2xl font-bold">🧾 Settle Balances</h2>
+
+            <input
+              type="text"
+              placeholder="Search by customer name..."
+              value={search}
+              onChange={(e) => {
+                setSearch(e.target.value);
+                setPage(1);
+              }}
+              className="w-full max-w-md px-4 py-2 border rounded-lg"
+            />
+
+            {balances.length === 0 ? (
+              <p>No matching customers</p>
+            ) : (
+              balances.map((b: any) => (
+                <div
+                  key={b._id}
+                  className="border rounded-xl p-4 flex justify-between items-center"
+                >
+                  <div>
+                    <p className="font-semibold">{b.userName}</p>
+                    <p className="text-sm text-muted-foreground">
+                      📞 {b.phone}
+                    </p>
                   </div>
 
                   <div className="flex items-center gap-4">
@@ -404,18 +525,19 @@ useEffect(() => {
                     </p>
 
                     <button
-                      onClick={() =>
-                        setConfirmUser({
+                      onClick={() => {
+                        setSettleUser({
                           id: b._id,
                           name: b.userName,
-                          amount: b.totalDue,
-                        })
-                      }
+                          maxAmount: b.totalDue,
+                        });
+                        setSettleAmountInput(String(b.totalDue));
+                      }}
                       className="px-3 py-1.5 text-sm font-medium
-                                 bg-green-600 text-white rounded-md
-                                 hover:bg-green-700 transition"
+                                 bg-blue-600 text-white rounded-md
+                                 hover:bg-blue-700 transition"
                     >
-                      ✓ Paid
+                      Settle
                     </button>
                   </div>
                 </div>
@@ -451,9 +573,9 @@ useEffect(() => {
       )}
     </div>
 
-    {/* ✅ GLOBAL CONFIRM MODAL (FIXED FOR MOBILE) */}
+    {/* ✅ PARTIAL SETTLEMENT MODAL */}
     <AnimatePresence>
-      {confirmUser && (
+      {settleUser && (
         <motion.div
           className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 px-4"
           initial={{ opacity: 0 }}
@@ -467,23 +589,34 @@ useEffect(() => {
             exit={{ scale: 0.9, opacity: 0 }}
           >
             <h3 className="text-lg font-semibold mb-2">
-              Confirm payment
+              Settle balance
             </h3>
 
             <p className="text-sm text-muted-foreground mb-4">
-              Mark <strong>{confirmUser.name}</strong>’s balance as paid?
+              Enter amount to settle for{" "}
+              <strong>{settleUser.name}</strong>.
             </p>
 
-            <div className="flex justify-between items-center mb-6">
-              <span className="text-sm">Amount</span>
-              <span className="text-lg font-bold text-red-600">
-                ₹{confirmUser.amount}
-              </span>
+            <div className="mb-4">
+              <label className="block text-xs text-muted-foreground mb-1">
+                Amount (max ₹{settleUser.maxAmount})
+              </label>
+              <input
+                type="number"
+                min={0}
+                max={settleUser.maxAmount}
+                value={settleAmountInput}
+                onChange={(e) => setSettleAmountInput(e.target.value)}
+                className="w-full px-3 py-2 border rounded-lg"
+              />
             </div>
 
             <div className="flex gap-3">
               <button
-                onClick={() => setConfirmUser(null)}
+                onClick={() => {
+                  setSettleUser(null);
+                  setSettleAmountInput("");
+                }}
                 className="flex-1 px-4 py-2 border rounded-lg"
               >
                 Cancel
@@ -491,10 +624,15 @@ useEffect(() => {
 
               <button
                 onClick={() => {
-                  handleMarkBalanceAsPaid(confirmUser.id);
-                  setConfirmUser(null);
+                  const numericAmount = Number(settleAmountInput);
+                  if (!Number.isFinite(numericAmount) || numericAmount <= 0) {
+                    return;
+                  }
+                  handlePartialSettle(settleUser.id, numericAmount);
+                  setSettleUser(null);
+                  setSettleAmountInput("");
                 }}
-                className="flex-1 px-4 py-2 bg-green-600 text-white rounded-lg"
+                className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg"
               >
                 Confirm
               </button>

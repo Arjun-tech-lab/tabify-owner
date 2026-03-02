@@ -11,7 +11,9 @@ interface LedgerEntry {
   type: "order" | "payment";
   amount: number;
   date: string;
-  balanceAfter:number;
+  balanceAfter: number;
+  description?: string;
+  isSettlement?: boolean;
 }
 
 interface Customer {
@@ -105,11 +107,14 @@ export default function LedgerPage() {
           <th className="py-2 px-2 text-right font-medium">
             Balance
           </th>
+          <th className="py-2 px-2 text-left font-medium">
+            Note
+          </th>
         </tr>
       </thead>
 
       <tbody>
-        {ledger.map((entry, idx) => {
+        {[...ledger].reverse().map((entry, idx) => {
           const dateObj = new Date(entry.date);
 
           return (
@@ -139,6 +144,11 @@ export default function LedgerPage() {
               {/* RUNNING BALANCE */}
               <td className="py-2 px-2 text-right font-semibold">
                 ₹{entry.balanceAfter}
+              </td>
+
+              {/* NOTE */}
+              <td className="py-2 px-2 text-xs text-green-700">
+                {entry.isSettlement ? "Settled amount" : ""}
               </td>
             </tr>
           );

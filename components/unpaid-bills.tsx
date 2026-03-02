@@ -1,7 +1,6 @@
 "use client";
 
 import { motion } from "framer-motion";
-import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 
 /* ✅ Backend Order shape */
@@ -21,13 +20,9 @@ interface Order {
 
 interface UnpaidBillsProps {
   orders: Order[];
-  onMarkAsPaid: (id: string) => void;
 }
 
-export default function UnpaidBills({
-  orders,
-  onMarkAsPaid,
-}: UnpaidBillsProps) {
+export default function UnpaidBills({ orders }: UnpaidBillsProps) {
   const containerVariants = {
     hidden: { opacity: 0 },
     show: {
@@ -96,12 +91,6 @@ export default function UnpaidBills({
                 </ul>
               </div>
 
-              <Button
-                onClick={() => onMarkAsPaid(order._id)}
-                className="w-full bg-accent hover:bg-accent/90 text-accent-foreground"
-              >
-                ✅ Mark as Paid
-              </Button>
             </Card>
           </motion.div>
         ))
